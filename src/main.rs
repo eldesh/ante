@@ -23,6 +23,7 @@ mod util;
 mod error;
 mod cache;
 mod cli;
+mod cps;
 
 #[macro_use]
 mod hir;
@@ -156,6 +157,9 @@ fn compile(args: Cli) {
         println!("{}", hir);
         return;
     }
+
+    let cps = cps::convert_to_cps(&hir);
+    println!("CPS:\n{}", cps);
 
     // Phase 5: Lifetime inference
     // util::timing::start_time("Lifetime Inference");
