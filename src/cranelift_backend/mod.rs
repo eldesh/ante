@@ -233,3 +233,15 @@ impl CodeGen for hir::Builtin {
         builtin::call_builtin(self, context, builder)
     }
 }
+
+impl CodeGen for hir::Handle {
+    fn codegen<'a>(&'a self, context: &mut Context<'a>, builder: &mut FunctionBuilder) -> Value {
+        self.expression.codegen(context, builder)
+    }
+}
+
+impl CodeGen for hir::Effect {
+    fn codegen<'a>(&'a self, _context: &mut Context<'a>, _builder: &mut FunctionBuilder) -> Value {
+        unreachable!("Unhandled effect encountered during codegen: {:?}", self)
+    }
+}

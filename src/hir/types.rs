@@ -39,8 +39,6 @@ pub struct FunctionType {
 pub enum Type {
     Primitive(PrimitiveType),
     Function(FunctionType),
-
-    /// Tuples have a TypeId to allow for struct recursion
     Tuple(Vec<Type>),
 }
 

@@ -159,7 +159,21 @@ fn compile(args: Cli) {
     }
 
     let cps = cps::convert_to_cps(&hir);
-    println!("CPS:\n{}", cps);
+    println!(r"#lang racket
+
+        (define (nth l i)
+          (if (string? l) 
+            (string-ref l i)
+            (list-ref l i)))
+        
+        (define (tail l i)
+          (if (string? l) 
+            (substring l i)
+            (list-tail l i)))
+        
+        {}
+        ", cps);
+    return;
 
     // Phase 5: Lifetime inference
     // util::timing::start_time("Lifetime Inference");

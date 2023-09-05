@@ -116,6 +116,12 @@ fn replace_env(expr: Ast, env: &Ast, definition_id: hir::DefinitionId, f: &hir::
             Ast::ReinterpretCast(cast)
         },
         Ast::Builtin(builtin) => Ast::Builtin(replace_env_builtin(builtin, env, definition_id, f)),
+        Ast::Handle(mut handle) => {
+            *handle.expression = replace_env(*handle.expression, env, definition_id, f);
+            *handle.branch_body.body = replace_env(*handle.branch_body.body, env, definition_id, f);
+            Ast::Handle(handle)
+        },
+        effect @ Ast::Effect(_) => effect,
     }
 }
 

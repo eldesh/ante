@@ -713,3 +713,15 @@ impl<'g> CodeGen<'g> for hir::Builtin {
         builtin::call_builtin(self, generator)
     }
 }
+
+impl<'g> CodeGen<'g> for hir::Handle {
+    fn codegen(&self, generator: &mut Generator<'g>) -> BasicValueEnum<'g> {
+        self.expression.codegen(generator)
+    }
+}
+
+impl<'g> CodeGen<'g> for hir::Effect {
+    fn codegen(&self, _generator: &mut Generator<'g>) -> BasicValueEnum<'g> {
+        unreachable!("Unhandled effect encountered during codegen: {:?}", self)
+    }
+}
