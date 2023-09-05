@@ -4,7 +4,8 @@ use super::ir::*;
 
 impl std::fmt::Display for Var {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.1, self.0)
+        let name = self.1.replace("'", "_");
+        write!(f, "{}{}", name, self.0)
     }
 }
 
@@ -19,14 +20,24 @@ impl std::fmt::Display for Atom {
             Atom::Bool(b) => write!(f, "{}", if *b { "#t" } else { "#f" }),
             Atom::Int(x, _) => write!(f, "{}", x),
             Atom::Float(x, _) => write!(f, "{}", f64::from_bits(*x)),
-            Atom::String(s) => write!(f, "\"{}\"", s),
-            Atom::Char(c) => write!(f, "\"{}\"", c),
+            Atom::String(s) => {
+                let s = s.replace("\n", "\\n");
+                write!(f, "\"{}\"", s)
+            }
+            Atom::Char(c) => {
+                if *c == '\n' {
+                    write!(f, "\"\\n\"")
+                } else {
+                    write!(f, "\"{}\"", c)
+                }
+            }
             Atom::Unit => write!(f, "'()"),
             Atom::Tuple(fields) => write!(f, "(list {})", fmap(fields, ToString::to_string).join(" ")),
             Atom::Extern(name, typ) => {
                 match name.as_str() {
                     "putchar" => write!(f, "(lambda (x k) (k (display x)))"),
                     "malloc" => write!(f, "(lambda (x k) (k (list x)))"),
+                    "exit" => write!(f, "(lambda (x k) (error x))"),
                     _ => write!(f, "(extern {name} : {typ})"),
                 }
             }
@@ -57,13 +68,13 @@ impl std::fmt::Display for Expr {
             },
             Expr::Atom(atom) => atom.fmt(f),
             Expr::Handle(handle) => {
-                write!(f, "[handle {} | {} {} -> {}]", handle.expr, handle.effect_fn, handle.k, handle.handler)
+                write!(f, "[handle {} {} {} {}]", handle.expr, handle.effect_fn, handle.k, handle.handler)
             },
             Expr::Switch(tag, cases, else_case) => {
-                write!(f, "(case {}", tag)?;
+                write!(f, "(cond")?;
 
                 for (i, case) in cases.iter() {
-                    write!(f, " [{} {}]", i, case)?;
+                    write!(f, " [(= {} {}) {}]", i, tag, case)?;
                 }
 
                 if let Some(case) = else_case {
@@ -88,9 +99,9 @@ impl std::fmt::Display for Builtin {
             Builtin::DivSigned(lhs, rhs) => write!(f, "(/ {} {})", lhs, rhs),
             Builtin::DivUnsigned(lhs, rhs) => write!(f, "(/ {} {})", lhs, rhs),
             Builtin::DivFloat(lhs, rhs) => write!(f, "(/ {} {})", lhs, rhs),
-            Builtin::ModSigned(lhs, rhs) => write!(f, "(% {} {})", lhs, rhs),
-            Builtin::ModUnsigned(lhs, rhs) => write!(f, "(% {} {})", lhs, rhs),
-            Builtin::ModFloat(lhs, rhs) => write!(f, "(% {} {})", lhs, rhs),
+            Builtin::ModSigned(lhs, rhs) => write!(f, "(modulo {} {})", lhs, rhs),
+            Builtin::ModUnsigned(lhs, rhs) => write!(f, "(modulo {} {})", lhs, rhs),
+            Builtin::ModFloat(lhs, rhs) => write!(f, "(modulo {} {})", lhs, rhs),
             Builtin::LessSigned(lhs, rhs) => write!(f, "(< {} {})", lhs, rhs),
             Builtin::LessUnsigned(lhs, rhs) => write!(f, "(< {} {})", lhs, rhs),
             Builtin::LessFloat(lhs, rhs) => write!(f, "(< {} {})", lhs, rhs),
