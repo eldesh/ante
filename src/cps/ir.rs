@@ -88,7 +88,7 @@ pub enum Builtin {
 
     Truncate(Atom, Type),
     Deref(Atom, Type),
-    Offset(Atom, Atom, u32), // u32 is the pointer element size in bytes
+    Offset(Atom, Atom, Type), // The Type is the element type
     Transmute(Atom, Type),
 
     /// Allocate space for the given value on the stack, and store it there. Return the stack address

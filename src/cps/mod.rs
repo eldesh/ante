@@ -409,10 +409,10 @@ impl Context {
             hir::Builtin::Deref(l, r) => one_arg_and_type(Builtin::Deref, self, l, r, rest),
             hir::Builtin::Transmute(l, r) => one_arg_and_type(Builtin::Transmute, self, l, r, rest),
             hir::Builtin::StackAlloc(l) => one_arg(Builtin::StackAlloc, self, l, rest),
-            hir::Builtin::Offset(l, r, size) => {
+            hir::Builtin::Offset(l, r, typ) => {
                 self.tk(l, Box::new(move |this, lhs| {
                     this.tk(r, Box::new(move |_, rhs| {
-                        Expr::Builtin(Builtin::Offset(lhs, rhs, *size), rest)
+                        Expr::Builtin(Builtin::Offset(lhs, rhs, typ.clone()), rest)
                     }))
                 }))
             },

@@ -55,7 +55,7 @@ pub fn call_builtin<'ast>(builtin: &'ast Builtin, context: &mut Context<'ast>, b
         Builtin::Truncate(a, _typ) => truncate(value(a), builder),
 
         Builtin::Deref(a, typ) => return deref(context, typ, a, builder),
-        Builtin::Offset(a, b, elem_size) => offset(value(a), value(b), *elem_size, builder),
+        Builtin::Offset(a, b, elem_size) => offset(value(a), value(b), elem_size, builder),
         Builtin::Transmute(a, typ) => return transmute(context, a, typ, builder),
         Builtin::StackAlloc(a) => stack_alloc(a, context, builder),
     };
@@ -140,17 +140,20 @@ fn eq_bool(param1: CraneliftValue, param2: CraneliftValue, builder: &mut Functio
     b1_to_i8(builder.ins().icmp(IntCC::Equal, param1, param2), builder)
 }
 
-fn transmute<'a>(context: &mut Context<'a>, param: &'a Ast, typ: &crate::hir::Type, builder: &mut FunctionBuilder) -> Value {
+fn transmute<'a>(
+    context: &mut Context<'a>, param: &'a Ast, typ: &crate::hir::Type, builder: &mut FunctionBuilder,
+) -> Value {
     let value = param.codegen(context, builder);
     context.transmute(value, typ, builder)
 }
 
 fn offset(
-    address: CraneliftValue, offset: CraneliftValue, elem_size: u32, builder: &mut FunctionBuilder,
+    address: CraneliftValue, offset: CraneliftValue, elem_type: &crate::hir::Type, builder: &mut FunctionBuilder,
 ) -> CraneliftValue {
     let usize_type = int_pointer_type();
     let pointer_type = pointer_type();
 
+    let elem_size = elem_type.size_in_bytes();
     let size = builder.ins().iconst(usize_type, elem_size as i64);
     let offset = builder.ins().imul(offset, size);
 

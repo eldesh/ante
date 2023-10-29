@@ -30,13 +30,12 @@ use inkwell::module::{Linkage, Module};
 use inkwell::passes::{PassManager, PassManagerBuilder};
 use inkwell::targets::{CodeModel, FileType, RelocMode, TargetTriple};
 use inkwell::targets::{InitializationConfig, Target, TargetMachine};
-use inkwell::types::{BasicType, BasicTypeEnum, PointerType};
-use inkwell::values::{AggregateValue, BasicValue, BasicValueEnum, CallableValue, FunctionValue, InstructionOpcode};
+use inkwell::types::{BasicType, BasicTypeEnum, FunctionType};
+use inkwell::values::{AggregateValue, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode};
 use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -176,10 +175,11 @@ impl<'g> Generator<'g> {
         pass_manager_builder.populate_module_pass_manager(&pass_manager);
         pass_manager.run_on(&self.module);
 
+        // TODO: It seems this method was removed; re-evaluate if inlining is still done
         // Do LTO optimizations afterward mosty for function inlining
-        let link_time_optimizations = PassManager::create(());
-        pass_manager_builder.populate_lto_pass_manager(&link_time_optimizations, false, true);
-        link_time_optimizations.run_on(&self.module);
+        // let link_time_optimizations = PassManager::create(());
+        // pass_manager_builder.populate_lto_pass_manager(&link_time_optimizations, false, true);
+        // link_time_optimizations.run_on(&self.module);
     }
 
     /// Output the current module to a file and link with gcc.
@@ -220,7 +220,7 @@ impl<'g> Generator<'g> {
     /// its entry block as the current insert point. Returns the
     /// pointer to the function.
     fn function(&mut self, name: &str, typ: &hir::FunctionType) -> (FunctionValue<'g>, BasicValueEnum<'g>) {
-        let raw_function_type = self.convert_function_type(typ).get_element_type().into_function_type();
+        let raw_function_type = self.convert_function_type(typ);
 
         let function = self.module.add_function(name, raw_function_type, Some(Linkage::Internal));
 
@@ -242,10 +242,13 @@ impl<'g> Generator<'g> {
         i1.const_int(0, false).into()
     }
 
-    fn convert_function_type(&mut self, f: &hir::FunctionType) -> PointerType<'g> {
+    /// Converts a hir::FunctionType directly to an inkwell FunctionType.
+    /// Note that the representation of functions in Ante is typically not
+    /// a FunctionType directly but a function pointeror closure tuple.
+    fn convert_function_type(&mut self, f: &hir::FunctionType) -> FunctionType<'g> {
         let parameters = fmap(&f.parameters, |param| self.convert_type(param).into());
         let ret = self.convert_type(&f.return_type);
-        ret.fn_type(&parameters, false).ptr_type(AddressSpace::default())
+        ret.fn_type(&parameters, false)
     }
 
     fn convert_type(&mut self, typ: &hir::Type) -> BasicTypeEnum<'g> {
@@ -264,7 +267,7 @@ impl<'g> Generator<'g> {
                     PrimitiveType::Pointer => self.context.i8_type().ptr_type(AddressSpace::default()).into(),
                 }
             },
-            hir::Type::Function(f) => self.convert_function_type(f).into(),
+            hir::Type::Function(f) => self.convert_function_type(f).ptr_type(AddressSpace::default()).into(),
             hir::Type::Tuple(tuple) => {
                 let fields = fmap(tuple, |typ| self.convert_type(typ));
                 self.context.struct_type(&fields, true).into()
@@ -277,7 +280,7 @@ impl<'g> Generator<'g> {
     }
 
     /// Returns the size in bits of this integer.
-    fn integer_bit_count(&mut self, int_kind: hir::IntegerKind) -> u32 {
+    fn integer_bit_count(&self, int_kind: hir::IntegerKind) -> u32 {
         use hir::IntegerKind::*;
         match int_kind {
             I8 | U8 => 8,
@@ -334,7 +337,8 @@ impl<'g> Generator<'g> {
 
         let cstring_type = self.context.i8_type().ptr_type(AddressSpace::default());
 
-        let cast = self.builder.build_pointer_cast(value, cstring_type, "string_cast");
+        let cast = self.builder.build_pointer_cast(value, cstring_type, "string_cast")
+            .expect("Internal error creating an llvm pointer cast");
 
         cast.as_basic_value_enum()
     }
@@ -352,7 +356,7 @@ impl<'g> Generator<'g> {
 
     fn build_return(&mut self, return_value: BasicValueEnum<'g>) {
         if !self.current_instruction_is_block_terminator() {
-            self.builder.build_return(Some(&return_value));
+            self.builder.build_return(Some(&return_value)).expect("Could not create return");
         }
     }
 
@@ -371,19 +375,24 @@ impl<'g> Generator<'g> {
             (branch_value.get_type(), None)
         } else {
             let branch_block = self.current_block();
-            self.builder.build_unconditional_branch(end_block);
+            self.builder.build_unconditional_branch(end_block).expect("Could not create br");
             (branch_value.get_type(), Some((branch_value, branch_block)))
         }
     }
 
     fn reinterpret_cast(&mut self, value: BasicValueEnum<'g>, target_type: BasicTypeEnum<'g>) -> BasicValueEnum<'g> {
         let source_type = value.get_type();
-        let alloca = self.builder.build_alloca(source_type, "alloca");
-        self.builder.build_store(alloca, value);
+        let alloca = self.builder.build_alloca(source_type, "alloca")
+            .expect("Error creating alloca");
 
-        let target_type = target_type.ptr_type(AddressSpace::default());
-        let cast = self.builder.build_pointer_cast(alloca, target_type, "cast");
-        self.builder.build_load(cast, "union_cast")
+        self.builder.build_store(alloca, value).expect("Could not create store during cast");
+
+        let target_pointer_type = target_type.ptr_type(AddressSpace::default());
+        let cast = self.builder.build_pointer_cast(alloca, target_pointer_type, "cast")
+            .expect("Error creating pointer cast");
+
+        self.builder.build_load(target_type, cast, "union_cast")
+            .expect("Error creating load")
     }
 
     fn tuple(
@@ -442,14 +451,18 @@ impl<'g> Generator<'g> {
 
     /// Creates a GEP instruction and Load which emulate a single Extract instruction but
     /// delays the Load as long as possible to make assigning to this as an l-value easier later on.
-    fn gep_at_index(&mut self, load: BasicValueEnum<'g>, field_index: u32, field_name: &str) -> BasicValueEnum<'g> {
+    fn gep_at_index(&mut self, load: BasicValueEnum<'g>, field_index: u32, field_type: &hir::Type, field_name: &str) -> BasicValueEnum<'g> {
         let instruction = load.as_instruction_value().unwrap();
         assert_eq!(instruction.get_opcode(), InstructionOpcode::Load);
 
         let pointer = instruction.get_operand(0).unwrap().left().unwrap().into_pointer_value();
 
-        let gep = self.builder.build_struct_gep(pointer, field_index, field_name).unwrap();
-        self.builder.build_load(gep, field_name)
+        let gep = self.builder.build_struct_gep(load.get_type(), pointer, field_index, field_name)
+            .expect("Error creating GEP");
+
+        let field_type = self.convert_type(field_type);
+        self.builder.build_load(field_type, gep, field_name)
+            .expect("Error creating load")
     }
 }
 
@@ -490,7 +503,9 @@ impl<'g> CodeGen<'g> for hir::Variable {
         };
 
         if generator.auto_derefs.contains(&self.definition_id) {
-            value = generator.builder.build_load(value.into_pointer_value(), "");
+            let typ = generator.convert_type(&self.typ);
+            value = generator.builder.build_load(typ, value.into_pointer_value(), "")
+                .expect("Error creating load");
         }
 
         value
@@ -524,9 +539,11 @@ impl<'g> CodeGen<'g> for hir::FunctionCall {
     fn codegen(&self, generator: &mut Generator<'g>) -> BasicValueEnum<'g> {
         let function = self.function.codegen(generator).into_pointer_value();
         let args = fmap(&self.args, |arg| arg.codegen(generator).into());
+        let function_type = generator.convert_function_type(&self.function_type);
 
-        let function = CallableValue::try_from(function).unwrap();
-        generator.builder.build_call(function, &args, "").try_as_basic_value().left().unwrap()
+        generator.builder.build_indirect_call(function_type, function, &args, "")
+            .expect("Could not build indirect call")
+            .try_as_basic_value().left().unwrap()
     }
 }
 
@@ -567,7 +584,8 @@ impl<'g> CodeGen<'g> for hir::If {
 
         // Setup conditional jump
         let else_block = generator.context.append_basic_block(current_function, "else");
-        generator.builder.build_conditional_branch(condition.into_int_value(), then_block, else_block);
+        generator.builder.build_conditional_branch(condition.into_int_value(), then_block, else_block)
+            .expect("Could not create conditional branch for if");
 
         generator.builder.position_at_end(then_block);
         let (if_type, then_option) = generator.codegen_branch(&self.then, end_block);
@@ -582,14 +600,17 @@ impl<'g> CodeGen<'g> for hir::If {
         // determine which we should add to the phi or if we should even create a phi at all.
         match (then_option, else_option) {
             (Some((then_value, then_branch)), Some((else_value, else_branch))) => {
-                let phi = generator.builder.build_phi(then_value.get_type(), "if_result");
+                let phi = generator.builder.build_phi(then_value.get_type(), "if_result")
+                    .expect("Could not build phi");
+
                 phi.add_incoming(&[(&then_value, then_branch), (&else_value, else_branch)]);
                 phi.as_basic_value()
             },
             (Some((then_value, _)), None) => then_value,
             (None, Some((else_value, _))) => else_value,
             (None, None) => {
-                generator.builder.build_unreachable();
+                generator.builder.build_unreachable()
+                    .expect("Could not create 'unreachable' for if");
 
                 // Block is unreachable but we still need to return an undef value.
                 // If we return None the compiler would crash while compiling
@@ -609,7 +630,8 @@ impl<'g> CodeGen<'g> for hir::Match {
 impl<'g> CodeGen<'g> for hir::Return {
     fn codegen(&self, generator: &mut Generator<'g>) -> BasicValueEnum<'g> {
         let value = self.expression.codegen(generator);
-        generator.builder.build_return(Some(&value));
+        generator.builder.build_return(Some(&value))
+            .expect("Could not create an llvm return");
         value
     }
 }
@@ -629,18 +651,20 @@ impl<'g> CodeGen<'g> for hir::Sequence {
 impl<'g> CodeGen<'g> for hir::Extern {
     fn codegen(&self, generator: &mut Generator<'g>) -> BasicValueEnum<'g> {
         let name = &self.name;
-        let llvm_type = generator.convert_type(&self.typ);
 
-        if matches!(&self.typ, hir::Type::Function(_)) {
-            let function_type = llvm_type.into_pointer_type().get_element_type().into_function_type();
-
-            generator
-                .module
-                .add_function(name, function_type, Some(Linkage::External))
-                .as_global_value()
-                .as_basic_value_enum()
-        } else {
-            generator.module.add_global(llvm_type, None, name).as_basic_value_enum()
+        match &self.typ {
+            hir::Type::Function(function_type) => {
+                let function_type = generator.convert_function_type(function_type);
+                generator
+                    .module
+                    .add_function(name, function_type, Some(Linkage::External))
+                    .as_global_value()
+                    .as_basic_value_enum()
+            }
+            _ => {
+                let llvm_type = generator.convert_type(&self.typ);
+                generator.module.add_global(llvm_type, None, name).as_basic_value_enum()
+            }
         }
     }
 }
@@ -654,7 +678,9 @@ impl<'g> CodeGen<'g> for hir::MemberAccess {
         // This will delay the load as long as possible which makes this easier to detect
         // as a valid l-value in hir::Assignment::codegen.
         match lhs.as_instruction_value().map(|instr| instr.get_opcode()) {
-            Some(InstructionOpcode::Load) => generator.gep_at_index(lhs, index, ""),
+            Some(InstructionOpcode::Load) => {
+                generator.gep_at_index(lhs, index, &self.typ, "")
+            }
             _ => {
                 let collection = lhs.into_struct_value();
                 generator.builder.build_extract_value(collection, index, "").unwrap()
@@ -678,9 +704,10 @@ impl<'g> CodeGen<'g> for hir::Assignment {
         let rhs = self.rhs.codegen(generator);
 
         let rhs_ptr = rhs.get_type().ptr_type(AddressSpace::default());
-        let lhs = generator.builder.build_pointer_cast(lhs, rhs_ptr, "bitcast");
+        let lhs = generator.builder.build_pointer_cast(lhs, rhs_ptr, "bitcast")
+            .expect("Failed to create point cast during assignment");
 
-        generator.builder.build_store(lhs, rhs);
+        generator.builder.build_store(lhs, rhs).expect("Could not build store");
         generator.unit_value()
     }
 }
