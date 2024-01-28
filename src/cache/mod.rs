@@ -388,7 +388,7 @@ pub fn cached_read<'a>(file_cache: &'a FileCache<'_>, path: &Path) -> Option<Cow
             let mut contents = String::new();
             reader.read_to_string(&mut contents).ok()?;
             Some(Cow::Owned(contents))
-        }
+        },
     }
 }
 
