@@ -462,7 +462,7 @@ impl<'local> Context<'local> {
         let slot = builder.create_stack_slot(data);
 
         self.store_stack_value(value, slot, &mut 0, builder);
-        self.load_stack_value(target_type, slot, &mut 0, builder)
+        Self::load_stack_value(target_type, slot, &mut 0, builder)
     }
 
     fn store_stack_value(&mut self, value: Value, slot: StackSlot, offset: &mut u32, builder: &mut FunctionBuilder) {
@@ -496,7 +496,7 @@ impl<'local> Context<'local> {
     }
 
     fn load_stack_value(
-        &mut self, target_type: &Type, slot: StackSlot, offset: &mut u32, builder: &mut FunctionBuilder,
+        target_type: &Type, slot: StackSlot, offset: &mut u32, builder: &mut FunctionBuilder,
     ) -> Value {
         let mut load_single = |typ| {
             let value = builder.ins().stack_load(typ, slot, *offset as i32);
@@ -505,14 +505,14 @@ impl<'local> Context<'local> {
         };
 
         match target_type {
-            Type::Tuple(elems) => Value::Tuple(fmap(elems, |elem| self.load_stack_value(elem, slot, offset, builder))),
+            Type::Tuple(elems) => Value::Tuple(fmap(elems, |elem| Self::load_stack_value(elem, slot, offset, builder))),
             Type::Primitive(p) => load_single(convert_primitive_type(p)),
             Type::Function(_) => load_single(function_type()),
         }
     }
 
     pub fn load_value(
-        &mut self, target_type: &Type, addr: CraneliftValue, offset: &mut i32, builder: &mut FunctionBuilder,
+        target_type: &Type, addr: CraneliftValue, offset: &mut i32, builder: &mut FunctionBuilder,
     ) -> Value {
         let mut load_single = |typ| {
             let value = builder.ins().load(typ, MemFlags::new(), addr, *offset);
@@ -521,7 +521,7 @@ impl<'local> Context<'local> {
         };
 
         match target_type {
-            Type::Tuple(elems) => Value::Tuple(fmap(elems, |elem| self.load_value(elem, addr, offset, builder))),
+            Type::Tuple(elems) => Value::Tuple(fmap(elems, |elem| Self::load_value(elem, addr, offset, builder))),
             Type::Primitive(p) => load_single(convert_primitive_type(p)),
             Type::Function(_) => load_single(function_type()),
         }

@@ -252,7 +252,7 @@ fn truncate(param1: CraneliftValue, builder: &mut FunctionBuilder) -> CraneliftV
 
 fn deref<'a>(context: &mut Context<'a>, typ: &crate::hir::Type, addr: &'a Ast, builder: &mut FunctionBuilder) -> Value {
     let addr = addr.eval_single(context, builder);
-    context.load_value(typ, addr, &mut 0, builder)
+    Context::load_value(typ, addr, &mut 0, builder)
 }
 
 fn stack_alloc<'a>(param1: &'a Ast, context: &mut Context<'a>, builder: &mut FunctionBuilder) -> CraneliftValue {
